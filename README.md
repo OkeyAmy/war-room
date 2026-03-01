@@ -38,8 +38,10 @@ graph TD
     A1 -->|Tools| CB[Shared Crisis Board]
     A2 -->|Tools| CB
     A3 -->|Tools| CB
+    WA -->|Timer: Escalation Events| CB
+    OA -->|Reads Transcripts & Scores Trust| FS[(Firestore DB)]
     
-    CB -->|Events| FS[(Firestore DB)]
+    CB -->|Events| FS
     FS -->|Snapshot Listener| GW
 ```
 
