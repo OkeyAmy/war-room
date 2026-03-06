@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     gcp_project_id: str = "war-room-dev"
     google_application_credentials: str = ""
     google_api_key: str = ""
+    gemini_api_key: str = ""
 
     # Firestore
     firestore_emulator_host: str = ""
@@ -52,6 +53,10 @@ class Settings(BaseSettings):
     elevenlabs_stt_model: str = "scribe_v2_realtime" # "scribe_v1"
     elevenlabs_tts_model: str = "eleven_turbo_v2_5"
 
+    # Gemini TTS fallback (used when ElevenLabs TTS fails after all retries)
+    # Requires GOOGLE_API_KEY or GOOGLE_APPLICATION_CREDENTIALS to be set.
+    gemini_tts_model: str = "gemini-2.5-flash-preview-tts"
+
     # LiveKit (server API)
     livekit_url: str = ""
     livekit_api_key: str = ""
@@ -80,6 +85,7 @@ def get_settings() -> Settings:
     # which the google.genai.Client constructor requires.
     if s.google_api_key:
         os.environ.setdefault("GOOGLE_API_KEY", s.google_api_key)
+        os.environ.setdefault("GEMINI_API_KEY", s.google_api_key)
     if s.google_application_credentials:
         os.environ.setdefault(
             "GOOGLE_APPLICATION_CREDENTIALS", s.google_application_credentials

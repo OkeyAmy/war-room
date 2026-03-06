@@ -90,7 +90,7 @@ def test_livekit_environment():
     assert env_ok, "Missing required environment variables"
 
     settings = get_settings()
-    model_ok = settings.text_model == "gemini-3-flash-preview"
+    model_ok = settings.text_model == "gemini-2.5-pro"
     backend_ok = settings.voice_backend == "livekit_elevenlabs"
 
     eleven_ok = False

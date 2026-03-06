@@ -111,6 +111,19 @@ VOICE_STYLE_MAP = {
     "aggressive":    ["pNInz6obpgDQGcFmaJgB", "SOYHLrjzK2X1ezoPC6cr", "nPczCjzI2devNBz1zQrb"],
 }
 
+# Gemini TTS voice names mapped by voice style.
+# Used as fallback when ElevenLabs TTS fails or retries are exhausted.
+# Voices sourced from: https://ai.google.dev/gemini-api/docs/speech-generation#voices
+GEMINI_TTS_VOICE_STYLE_MAP = {
+    "authoritative": "Charon",     # Deep, assertive — authority figures
+    "warm":          "Aoede",      # Warm, inviting — advisors and counsellors
+    "clipped":       "Puck",       # Quick, crisp — operations/comms roles
+    "measured":      "Kore",       # Balanced, neutral — default fallback
+    "urgent":        "Fenrir",     # Intense, high-energy — threat/security roles
+    "calm":          "Leda",       # Smooth, calming — mediation/HR roles ("Auva" is invalid)
+    "aggressive":    "Schedar",    # Forceful, confrontational — legal/risk roles
+}
+
 # Legacy Gemini Live voices for fallback mode when ElevenLabs is unavailable.
 GEMINI_FALLBACK_VOICES = [
     "Aoede", "Charon", "Fenrir", "Kore", "Puck",

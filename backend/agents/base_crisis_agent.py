@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import os
 import uuid
 import logging
 import re
@@ -91,6 +92,14 @@ class CrisisAgent:
         self._lk_http_session = None
         self._lk_available_voice_ids: set[str] = set()
 
+        # Gemini TTS fallback — lazy-initialized on first ElevenLabs failure.
+        # _elevenlabs_dead is a sticky flag: once ElevenLabs is confirmed broken
+        # (Unauthorized / persistent network error), it stays True for the session
+        # lifetime and all subsequent turns skip ElevenLabs entirely.
+        self._elevenlabs_dead: bool = False
+        self._gemini_tts = None
+        self._gemini_voice_name: str = "Kore"
+
         # Firestore refs (lazy-initialized)
         self._db = None
         self._memory_ref = None
@@ -123,13 +132,22 @@ class CrisisAgent:
             allow_interruptions = self.livekit_session_config.get(
                 "voice_options", {}
             ).get("allow_interruptions", True)
+            tts_label = f"elevenlabs:{self.elevenlabs_tts_model}"
+            if self._gemini_tts:
+                tts_label += f"+gemini_fallback:{self._gemini_voice_name}"
             return (
                 f"backend={self.voice_backend} "
                 f"stt=elevenlabs:{self.elevenlabs_stt_model} "
-                f"tts=elevenlabs:{self.elevenlabs_tts_model} "
+                f"tts={tts_label} "
                 f"voice_id={self.assigned_voice} "
                 f"llm={self.text_model} "
                 f"allow_interruptions={str(bool(allow_interruptions)).lower()}"
+            )
+        if self._gemini_tts:
+            return (
+                f"backend=gemini_tts_fallback "
+                f"tts=gemini:{self._gemini_voice_name} "
+                f"llm={self.text_model}"
             )
         if self.live_session:
             return (
@@ -388,6 +406,195 @@ class CrisisAgent:
             return True
         except Exception as e:
             logger.warning(f"[VOICE] {self.agent_id} failed to rebuild ElevenLabs TTS: {e}")
+            return False
+
+    def _pick_gemini_tts_voice(self) -> str:
+        """
+        Map this agent's voice_style to a Gemini TTS voice name.
+        Falls back to 'Kore' if unmapped or invalid.
+        """
+        from config.constants import GEMINI_TTS_VOICE_STYLE_MAP
+
+        _VALID_GEMINI_VOICES = {
+            "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus",
+            "Aoede", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel",
+            "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia",
+            "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird",
+            "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+        }
+        voice_style = self.role_config.get("voice_style", "measured")
+        gemini_voice = GEMINI_TTS_VOICE_STYLE_MAP.get(voice_style, "Kore")
+        if gemini_voice not in _VALID_GEMINI_VOICES:
+            gemini_voice = "Kore"
+        return gemini_voice
+
+    async def _init_gemini_tts_fallback(self) -> bool:
+        """
+        Prepare metadata for the direct google.genai TTS fallback.
+        No heavy objects are created here — the actual Client is instantiated
+        per-call in _speak_via_gemini_tts so there is nothing to pickle/close.
+        """
+        try:
+            from google import genai  # noqa: F401 — just verify import works
+            settings = get_settings()
+            if not (settings.google_api_key or os.environ.get("GOOGLE_API_KEY")):
+                logger.warning(
+                    f"[{self.agent_id}] Gemini TTS fallback unavailable: "
+                    "no GOOGLE_API_KEY found"
+                )
+                return False
+
+            self._gemini_voice_name = self._pick_gemini_tts_voice()
+            # Use a sentinel so _speak_via_gemini_tts knows we're ready.
+            self._gemini_tts = True
+            logger.info(
+                f"[{self.agent_id}] Gemini TTS fallback ready "
+                f"(model={settings.gemini_tts_model}, voice={self._gemini_voice_name})"
+            )
+            return True
+        except ImportError:
+            logger.warning(
+                f"[{self.agent_id}] google-genai not installed — "
+                "Gemini TTS fallback unavailable"
+            )
+            return False
+        except Exception as e:
+            logger.warning(f"[{self.agent_id}] Gemini TTS fallback init failed: {e}")
+            return False
+
+    async def _speak_via_gemini_tts(
+        self,
+        text: str,
+        first_chunk: bool,
+        allow_interruptions: bool,
+    ) -> bool:
+        """
+        Synthesize *text* using the Gemini TTS API (google.genai) directly.
+
+        Uses google.genai.Client.models.generate_content() with
+        response_modalities=["AUDIO"] — the same path verified by
+        tests/test_ping_gemini_tts.py (returns ~128 KB for a short phrase).
+
+        The raw PCM/WAV bytes are sent as a single agent_audio_chunk event
+        with sample_rate=24000 (Gemini TTS default output rate).
+
+        Returns True if audio was delivered, False on any failure.
+        """
+        from utils.events import push_event, push_event_direct
+        from config.constants import (
+            EVENT_AGENT_SPEAKING_START,
+            EVENT_AGENT_STATUS_CHANGE,
+            EVENT_AGENT_SPEAKING_CHUNK,
+            EVENT_AGENT_INTERRUPTED,
+        )
+
+        if not self._gemini_tts:
+            if not await self._init_gemini_tts_fallback():
+                return False
+
+        try:
+            from google import genai
+            from google.genai import types as gtypes
+
+            settings = get_settings()
+            api_key = settings.google_api_key or os.environ.get("GOOGLE_API_KEY")
+            client = genai.Client(api_key=api_key)
+
+            # Run the synchronous generate_content in a thread to avoid
+            # blocking the event loop.
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: client.models.generate_content(
+                    model=settings.gemini_tts_model,
+                    contents=text,
+                    config=gtypes.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=gtypes.SpeechConfig(
+                            voice_config=gtypes.VoiceConfig(
+                                prebuilt_voice_config=gtypes.PrebuiltVoiceConfig(
+                                    voice_name=self._gemini_voice_name
+                                )
+                            )
+                        ),
+                    ),
+                ),
+            )
+
+            # Extract audio bytes from the response
+            audio_data: bytes | None = None
+            candidates = response.candidates or []
+            if candidates and candidates[0].content and candidates[0].content.parts:
+                for part in candidates[0].content.parts:
+                    if hasattr(part, "inline_data") and part.inline_data:
+                        audio_data = part.inline_data.data
+                        break
+
+            if not audio_data:
+                logger.warning(
+                    f"[{self.agent_id}] Gemini TTS returned no audio data "
+                    f"(voice={self._gemini_voice_name})"
+                )
+                return False
+
+            # Check for interruption before committing to playback
+            if (
+                allow_interruptions
+                and self.turn_manager
+                and self.turn_manager.should_yield(self.agent_id)
+            ):
+                await push_event(self.session_id, EVENT_AGENT_INTERRUPTED, {
+                    "agent_id": self.agent_id,
+                })
+                await self._update_roster_status("listening", "speaking")
+                return False
+
+            # Emit start events on first delivery
+            if first_chunk:
+                await push_event(self.session_id, EVENT_AGENT_SPEAKING_START, {
+                    "agent_id": self.agent_id,
+                    "character_name": self.role_config.get("character_name", "Agent"),
+                    "voice_name": f"gemini:{self._gemini_voice_name}",
+                    "tts_backend": "gemini_fallback",
+                })
+                await push_event(self.session_id, EVENT_AGENT_STATUS_CHANGE, {
+                    "agent_id": self.agent_id,
+                    "status": "speaking",
+                    "previous_status": "thinking",
+                })
+                await self._update_roster_status("speaking", "thinking")
+                await push_event_direct(
+                    self.session_id,
+                    EVENT_AGENT_SPEAKING_CHUNK,
+                    {"agent_id": self.agent_id, "transcript_chunk": text},
+                    source_agent_id=self.agent_id,
+                )
+
+            # Stream as a single audio chunk
+            # Gemini TTS outputs L16 PCM at 24 000 Hz mono by default.
+            audio_b64 = base64.b64encode(audio_data).decode()
+            await push_event_direct(
+                self.session_id,
+                "agent_audio_chunk",
+                {
+                    "agent_id": self.agent_id,
+                    "audio_b64": audio_b64,
+                    "sample_rate": 24000,
+                    "channels": 1,
+                    "bit_depth": 16,
+                    "tts_backend": "gemini_fallback",
+                },
+                source_agent_id=self.agent_id,
+            )
+            logger.info(
+                f"[{self.agent_id}] Gemini TTS delivered "
+                f"{len(audio_data) // 1024} KB of audio "
+                f"(voice={self._gemini_voice_name})"
+            )
+            return True
+
+        except Exception as e:
+            logger.warning(f"[{self.agent_id}] Gemini TTS fallback synthesis failed: {e}")
             return False
 
     def _build_live_config(self, types):
@@ -750,65 +957,107 @@ class CrisisAgent:
 
                 first_chunk = True
                 synthesis_ok = False
-                for attempt in range(1, 4):
-                    try:
-                        tts_stream = self._lk_tts.synthesize(reply_text) if self._lk_tts else None
-                        if not tts_stream:
-                            break
-                        async for ev in tts_stream:
-                            if first_chunk:
-                                await push_event(self.session_id, EVENT_AGENT_SPEAKING_START, {
-                                    "agent_id": self.agent_id,
-                                    "character_name": self.role_config.get("character_name", "Agent"),
-                                    "voice_name": self.assigned_voice,
-                                })
-                                await push_event(self.session_id, EVENT_AGENT_STATUS_CHANGE, {
-                                    "agent_id": self.agent_id,
-                                    "status": "speaking",
-                                    "previous_status": "thinking",
-                                })
-                                await self._update_roster_status("speaking", "thinking")
+
+                # ── ElevenLabs synthesis (skip if already known-dead) ────────
+                if self._elevenlabs_dead:
+                    logger.debug(
+                        f"[{self.agent_id}] ElevenLabs permanently failed — "
+                        "going straight to Gemini TTS"
+                    )
+                else:
+                    for attempt in range(1, 4):
+                        try:
+                            tts_stream = self._lk_tts.synthesize(reply_text) if self._lk_tts else None
+                            if not tts_stream:
+                                break
+                            async for ev in tts_stream:
+                                if first_chunk:
+                                    await push_event(self.session_id, EVENT_AGENT_SPEAKING_START, {
+                                        "agent_id": self.agent_id,
+                                        "character_name": self.role_config.get("character_name", "Agent"),
+                                        "voice_name": self.assigned_voice,
+                                    })
+                                    await push_event(self.session_id, EVENT_AGENT_STATUS_CHANGE, {
+                                        "agent_id": self.agent_id,
+                                        "status": "speaking",
+                                        "previous_status": "thinking",
+                                    })
+                                    await self._update_roster_status("speaking", "thinking")
+                                    await push_event_direct(
+                                        self.session_id,
+                                        EVENT_AGENT_SPEAKING_CHUNK,
+                                        {"agent_id": self.agent_id, "transcript_chunk": reply_text},
+                                        source_agent_id=self.agent_id,
+                                    )
+                                    first_chunk = False
+
+                                if (
+                                    allow_interruptions
+                                    and self.turn_manager
+                                    and self.turn_manager.should_yield(self.agent_id)
+                                ):
+                                    await push_event(self.session_id, EVENT_AGENT_INTERRUPTED, {
+                                        "agent_id": self.agent_id,
+                                    })
+                                    await self._update_roster_status("listening", "speaking")
+                                    break
+                                audio_b64 = base64.b64encode(ev.frame.data).decode()
                                 await push_event_direct(
                                     self.session_id,
-                                    EVENT_AGENT_SPEAKING_CHUNK,
-                                    {"agent_id": self.agent_id, "transcript_chunk": reply_text},
+                                    "agent_audio_chunk",
+                                    {
+                                        "agent_id": self.agent_id,
+                                        "audio_b64": audio_b64,
+                                        "sample_rate": ev.frame.sample_rate,
+                                        "channels": ev.frame.num_channels,
+                                        "bit_depth": 16,
+                                    },
                                     source_agent_id=self.agent_id,
                                 )
-                                first_chunk = False
-
-                            if (
-                                allow_interruptions
-                                and self.turn_manager
-                                and self.turn_manager.should_yield(self.agent_id)
-                            ):
-                                await push_event(self.session_id, EVENT_AGENT_INTERRUPTED, {
-                                    "agent_id": self.agent_id,
-                                })
-                                await self._update_roster_status("listening", "speaking")
-                                break
-                            audio_b64 = base64.b64encode(ev.frame.data).decode()
-                            await push_event_direct(
-                                self.session_id,
-                                "agent_audio_chunk",
-                                {
-                                    "agent_id": self.agent_id,
-                                    "audio_b64": audio_b64,
-                                    "sample_rate": ev.frame.sample_rate,
-                                    "channels": ev.frame.num_channels,
-                                    "bit_depth": 16,
-                                },
-                                source_agent_id=self.agent_id,
+                            synthesis_ok = True
+                            break
+                        except Exception as e:
+                            err_str = str(e).lower()
+                            logger.warning(
+                                f"[{self.agent_id}] ElevenLabs synth attempt {attempt}/3 failed: {e}"
                             )
-                        synthesis_ok = True
-                        break
-                    except Exception as e:
+                            # Treat HTTP 401 Unauthorized as a permanent failure —
+                            # no point retrying a credential error.
+                            if "unauthorized" in err_str or "401" in err_str:
+                                logger.warning(
+                                    f"[{self.agent_id}] ElevenLabs Unauthorized — "
+                                    "marking as permanently failed (will use Gemini TTS for all future turns)"
+                                )
+                                self._elevenlabs_dead = True
+                                break
+                            await self._rebuild_livekit_tts()
+                            await asyncio.sleep(min(1.0 * attempt, 2.5))
+                    if not synthesis_ok and not self._elevenlabs_dead:
+                        # Non-auth failure after 3 attempts — mark dead too.
+                        self._elevenlabs_dead = True
                         logger.warning(
-                            f"[{self.agent_id}] ElevenLabs synth attempt {attempt}/3 failed: {e}"
+                            f"[{self.agent_id}] ElevenLabs synthesis failed after retries "
+                            "— marking permanently failed"
                         )
-                        await self._rebuild_livekit_tts()
-                        await asyncio.sleep(min(1.0 * attempt, 2.5))
+
+                # ── Gemini TTS fallback ──────────────────────────────────────
                 if not synthesis_ok:
-                    logger.warning(f"[{self.agent_id}] ElevenLabs synthesis failed after retries")
+                    logger.info(
+                        f"[{self.agent_id}] ElevenLabs synthesis failed after retries "
+                        "— switching to Gemini TTS fallback"
+                    )
+                    synthesis_ok = await self._speak_via_gemini_tts(
+                        text=reply_text,
+                        first_chunk=first_chunk,
+                        allow_interruptions=allow_interruptions,
+                    )
+                    if synthesis_ok:
+                        logger.info(f"[{self.agent_id}] Gemini TTS fallback succeeded")
+                    else:
+                        logger.error(
+                            f"[{self.agent_id}] Both ElevenLabs and Gemini TTS failed "
+                            "— no audio delivered for this turn"
+                        )
 
                 await push_event(self.session_id, EVENT_AGENT_SPEAKING_END, {
                     "agent_id": self.agent_id,
@@ -1316,6 +1565,14 @@ class CrisisAgent:
             except Exception:
                 pass
             self._lk_tts = None
+
+        if self._gemini_tts:
+            try:
+                await self._gemini_tts.aclose()
+            except Exception:
+                pass
+            self._gemini_tts = None
+
         if self._lk_http_session and not self._lk_http_session.closed:
             try:
                 await self._lk_http_session.close()

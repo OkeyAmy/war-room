@@ -111,6 +111,30 @@ The most complex interaction layer, designed to handle "Gemini Live" bidirection
 
 ---
 
+## 🤖 Meet the Agents (The AI Ecosystem)
+
+WAR ROOM is powered by a diverse array of specialized Artificial Intelligence agents, each fulfilling a unique role to create a cohesive, immersive simulation. Here is a breakdown of the agents you will interact with and the invisible hands guiding the experience.
+
+### For the Director (Non-Technical Overview)
+
+Imagine you are running a real crisis simulation exercise. You are the Director, but you need a team to help you bring the scenario to life.
+
+* **The World Builder (Scenario Analyst):** Before the simulation begins, this agent preps the board. You tell them "We have an oil spill," and they generate the company details, the exact location, the initial news reports, and decide which expert advisors you'll need in the room.
+* **Your Advisors (Crisis Agents):** These are the experts you actually talk to during the simulation. They have distinct personalities, roles (e.g., Chief Legal Officer, Military General), and voices. They listen to what you say, debate with each other, and propose solutions based on their specific domain knowledge.
+* **The World Outside (World Agent):** The crisis doesn't wait for you. This agent acts as the unpredictable external world. It watches the clock and injects breaking news, lawsuits, or social media outrages exactly when you least expect them to keep the pressure high.
+* **The Silent Judge (Observer Agent):** Sitting quietly in the corner of the room, this agent watches everything. It takes notes on who is arguing with whom, tracks if your team is contradicting itself, and calculates a running "Trust Score." If you say one thing but do another, this agent will notice and deduct points from your final resolution score.
+
+### Under the Hood (Technical Implementation)
+
+The system utilizes an Event-Driven Architecture (EDA) to coordinate multiple independent LLM processes, simulating a unified environment.
+
+* **`ScenarioAnalyst`**: A single-shot generative pipeline invoked during session initialization. It calls the Gemini API to construct the crisis context, generate specific `SKILL.md` configurations for dynamic agents, and seed the Firestore database.
+* **`CrisisAgent`**: The core conversational LLMs. Each dynamically summoned agent (e.g., Legal, PR) runs autonomously as its own class instance, utilizing **Gemini Live** for bidirectional audio/text reasoning and **ElevenLabs** for synthesized WebRTC voice transmission. They maintain their own isolated memory state and use function calling (tools) to write to the shared crisis board.
+* **`WorldAgent`**: A timer-based execution engine. It does not participate in voice chat. Instead, it reads a predefined escalation schedule and asynchronously pushes structured `CRISIS_ESCALATION` events to the WebSocket gateway, forcing the connected clients (and the other Agents) to react.
+* **`ObserverAgent`**: A continuous, silent analytical loop. It intercepts all agent transcripts and evaluates them against the shared session state using a specialized LLM instruction. It outputs structured JSON containing relationship deltas (alliances/conflicts), detects contradictions, and dynamically adjusts agent Trust Scores and overall Posture metrics in the shared database.
+
+---
+
 ## 🧩 Architectural Breakdown
 
 ### The Frontend (Next.js)

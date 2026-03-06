@@ -2,59 +2,107 @@
 
 The backend of the **WAR ROOM** application is a robust, asynchronous API built with [FastAPI](https://fastapi.tiangolo.com/). It serves as the central orchestration layer for a multi-agent AI crisis simulation platform, managing real-time communications, scenario generation, and autonomous agent behavior.
 
-## High-Level Documentation
-
-This document outlines the core architecture and systemic components that power the backend simulation environment.
-
-### Core Technologies
+## Core Technologies
 
 * **Framework:** FastAPI (Python 3.10+) running on Uvicorn.
 * **AI Integration:**
-* **Google GenAI SDK:** For text-based agent reasoning and scenario generation.
-* **Gemini Live API:** For real-time conversational streaming and interaction logic.
-* **ElevenLabs:** For ultra-realistic text-to-speech (TTS) voice synthesis.
-* **LiveKit:** For WebRTC audio distribution and management.
+  * **Google GenAI SDK:** For text-based agent reasoning and scenario generation.
+  * **Gemini Live API:** For real-time conversational streaming and interaction logic.
+  * **ElevenLabs:** For ultra-realistic text-to-speech (TTS) voice synthesis.
+  * **LiveKit:** For WebRTC audio distribution and management.
 * **Database & Storage:** Google Cloud Firestore (production state management) with an in-memory mock adapter for local development and testing.
 
 ## System Architecture
 
-The backend code is modularized into several key domains:
+The backend codebase is modularized strictly into distinct domain directories:
 
-### 1. The Gateway (`/gateway`)
+### 1. Application Root (`/`)
 
-The Gateway handles all external communication with the Next.js frontend, exposing both RESTful endpoints and WebSockets.
+* **`main.py`:** The FastAPI application entry point. Sets up the server, configuration, and mounts all Gateway routes.
+* **`session_bootstrapper.py`:** The background worker that initializes new scenarios, seeds the database, and creates the AI agent roster when a crisis begins.
 
-* **REST Routes:** Endpoints logically grouped by domain (e.g., `agent_routes.py`, `scenario_routes.py`, `resolution_routes.py`, `intel_routes.py`) for fetching state, managing sessions, and triggering actions.
-* **WebSocket Routers:** Enables bi-directional, real-time sync. It pushes crisis events to connected clients and receives real-time audio streams from the user orchestrating the simulation (`chairman_audio_ws.py`).
-* **Connection Managers:** `connection_manager.py` maintains active socket connections and broadcasts state mutations efficiently to the frontend.
+### 2. The Gateway (`/gateway`)
 
-### 2. Autonomous Agent Ecosystem (`/agents`)
+Handles all external front-facing communication with the Next.js client.
 
-The simulation is driven by distinct, specialized AI agents operating concurrently.
+* **REST Routes:** Endpoints grouped by domain (e.g., `agent_routes.py`, `scenario_routes.py`, `intel_routes.py`) for fetching state and managing data.
+* **WebSockets & Real-Time Sync:** `connection_manager.py` maintains active socket connections and broadcasts database events instantly. `chairman_audio_ws.py` receives the Director's raw microphone audio.
+* **`chairman_handler.py`:** A dedicated orchestrator that receives the Director's inputs via WebSocket, parses the commands, and delegates them to the appropriate active Crisis Agents.
 
-* **`base_crisis_agent.py`:** The foundational base class that defines the lifecycle, reasoning loop, and communication methods for any participant agent.
-* **`dynamic_agent_factory.py`:** A factory module that instantiates specialized crisis agents with specific personalities and domains (e.g., Military, PR, Legal) dynamically based on the scenario's needs.
-* **`world_agent.py`:** Simulates the external environment (public reaction, media, stock markets) and injects unpredictable escalation events into the crisis.
-* **`scenario_analyst.py`:** Generates cohesive, intricate crisis scenarios based on user prompts.
-* **`observer_agent.py`:** Evaluates agent decisions, calculates trust scores, and assesses overall resolution trajectory.
+### 3. Autonomous Agent Ecosystem (`/agents`)
 
-### 3. Session & Event Management
+The brain of the simulation, consisting of isolated processes that interact over a shared database state.
 
-* **Bootstrapper (`session_bootstrapper.py`):** When a new crisis is initiated, the bootstrapper asynchronously spins up the scenario, seeds initial database structures, generates the world agent parameters, and creates the roster of responding crisis agents.
-* **Chairman Handler (`chairman_handler.py`):** An orchestrator that directly receives inputs from the user (The Chairman/Director), delegates them to the appropriate crisis agents, manages active agents per session, and enforces communication flow.
+```mermaid
+graph TD
+    GW[WebSocket Gateway] <-->|Audio/Events| CA[Crisis Agents]
+    
+    subgraph "Agent Array"
+        CA(Active Experts)
+        WA[World Agent]
+        OA[Observer Agent]
+    end
+    
+    DB[(Firestore Session State)]
+    
+    WA -.->|Reads Clock| WA
+    WA -->|Emits Escalation Events| DB
+    WA -->|Broadcasts to| GW
+    
+    CA <-->|Reads/Writes tools| DB
+    CA -->|Broadcasts Transcripts| OA
+    
+    OA -->|Analyzes transcripts vs prior state| DB
+    OA -->|Writes JSON Insights & Trust Updates| DB
+    OA -->|Triggers UI Updates via| GW
+```
+
+* **`scenario_analyst.py`:** Generates the cohesive, intricate initial crisis scenario and designs the roster.
+* **`dynamic_agent_factory.py`:** Dynamically spins up `CrisisAgent` instances on-the-fly with custom instructions (`SKILL.md`).
+* **`base_crisis_agent.py`:** The foundational class defining an agent's reasoning loop using Gemini Live.
+* **`world_agent.py`:** A timer-based escalation engine. It runs independently, injecting scheduled pressures (e.g., public outrage, stock crashes) into the database.
+* **`observer_agent.py`:** Evaluates every spoken transcript against the session's recorded history to detect contradictions and update agent Trust Scores.
+* **`voice_assignment.py`:** Maps unique voice personas to generated agents.
 
 ### 4. Audio Pipeline & Voice Engine (`/voice`)
 
-* Manages the complex orchestration of LiveKit sessions, Gemini API voice configurations, and ElevenLabs voice assignments (`voice_assignment.py` & `voice_routes.py`).
-* It ensures that distinct, consistent voices are mapped to generated agents, creating an immersive localized audio experience while enforcing a strict gate for speaker turns to prevent voice leakage.
+* Modules like `livekit_session.py` and `pipeline.py` manage the orchestration of LiveKit, taking the ElevenLabs TTS streams and broadcasting them into the active WebRTC room to deliver localized audio to the frontend.
 
-## Data Flow & Lifecycle
+### 5. Utilities & Tools (`/utils` & `/tools`)
 
-1. **Initialization:** The frontend requests a new session via POST `/api/sessions`. `main.py` writes an initial "assembling" state to Firestore and offloads heavy scenario generation to `session_bootstrapper.py` via background tasks.
-2. **Streaming:** The frontend establishes WebSocket connections.
-3. **Active Simulation:** The user speaks or sends directives. The `chairman_handler.py` processes this, invokes the necessary `CrisisAgent` instances, which then query context, compute responses via Google GenAI, trigger TTS streaming via ElevenLabs, and broadcast the resulting audio/transcripts back through the WebSocket gateway.
-4. **Escalations:** Concurrently, the `WorldAgent` evaluates session time and injects new variables, pushing updates directly to event streams.
-5. **Resolution:** The session concludes, shutting down background AI tasks, releasing WebSocket links, and dumping actionable scenario history to the DB for after-action reports.
+* **`/tools`:** Contains Function-Calling tool definitions (e.g., `crisis_board_tools.py`, `memory_tools.py`) that the Gemini models execute to read/write state.
+* **`/utils`:** Core helpers, including `firestore_helpers.py` for DB I/O, `events.py` for publishing WebSocket messages, and `pydantic_models.py` for strict data validation.
+
+---
+
+## What Happens in the Simulation (The Chronological Flow)
+
+To understand how these directories interact, here is the lifecycle of a War Room session:
+
+1. **Initialization (The Setup):**
+   * The Director (user) starts a session from the frontend using a prompt (e.g., "Cyberattack on grid").
+   * The frontend hits `POST /api/sessions/` inside `gateway/scenario_routes.py`.
+   * `/session_bootstrapper.py` fires off in the background. It calls `agents/scenario_analyst.py` to generate the threat, and `agents/dynamic_agent_factory.py` to spawn the expert personas (e.g., CISO, PR Director).
+   * Initial state is written to Firestore (`utils/firestore_helpers.py`) and broadcast to the waiting UI.
+
+2. **The Active Simulation (Real-Time Loop):**
+   * The UI establishes WebSockets (`gateway/connection_manager.py`) to receive data, and an audio WebSocket (`gateway/chairman_audio_ws.py`) for the microphone.
+   * **When the Director speaks:** `gateway/chairman_handler.py` routes the audio to Gemini for speech-to-text. The parsed text intent is passed into the `agents/base_crisis_agent.py` instances.
+   * The active agent "thinks," potentially using `/tools` to update the Crisis Board (like officially deciding on a response), and formulates a reply.
+   * The text reply is synthesized into real-time audio via ElevenLabs and streamed out through `/voice/pipeline.py` into LiveKit.
+
+3. **Background Escalation (The Squeeze):**
+   * While the Director debates with the experts, `agents/world_agent.py` ticks on a timer.
+   * When an escalation is scheduled, it injects an event directly into the Firestore session and emits a broadcast (`utils/events.py`). The frontend instantly flashes an alert, and the Director must hastily pivot their strategy.
+
+4. **Continuous Analysis (The Scorecard):**
+   * After every single turn of dialog, `agents/observer_agent.py` silently reads the transcript.
+   * It evaluates the agents' alignment, detects if the Director contradicted a prior command, and adjusts the session's hidden metrics (like "Trust Score" and "Public Posture"). These updates stream back down the WebSocket to silently update the UI bars.
+
+5. **Resolution:**
+   * The session hits a climax or the Director chooses to end it. The gateway processes shutdown tasks, cleanly disconnects the `/voice` WebRTC pipes, kills active LLM loops, and logs the final After Action Report based on the Observer's insights.
+
+---
 
 ## Running the Application
 

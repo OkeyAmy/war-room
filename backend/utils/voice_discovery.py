@@ -84,6 +84,37 @@ async def get_voice_style_map() -> dict[str, list[str]]:
     return VOICE_STYLE_MAP
 
 
+async def _check_gemini_tts_fallback() -> dict:
+    """
+    Probe Gemini TTS fallback availability.
+    Returns a status dict with 'available' bool and 'message' string.
+    """
+    try:
+        from livekit.plugins import google as lk_google  # noqa: F401
+        from config.settings import get_settings
+
+        settings = get_settings()
+        has_key = bool(settings.google_api_key) or bool(
+            settings.google_application_credentials
+        )
+        if not has_key:
+            return {
+                "available": False,
+                "message": "GOOGLE_API_KEY / GOOGLE_APPLICATION_CREDENTIALS not set",
+            }
+        return {
+            "available": True,
+            "message": f"livekit-plugins-google installed, model={settings.gemini_tts_model}",
+        }
+    except ImportError:
+        return {
+            "available": False,
+            "message": "livekit-plugins-google not installed",
+        }
+    except Exception as e:
+        return {"available": False, "message": str(e)}
+
+
 async def check_voice_health() -> dict:
     """
     Health check for the voice subsystem.
@@ -91,9 +122,10 @@ async def check_voice_health() -> dict:
     1. The voice pool is available (from SDK or fallback)
     2. The live audio model is reachable
     3. Voice assignment logic works
+    4. Gemini TTS fallback is accessible
 
     Returns:
-        Dict with 'status' ('pass'/'fail') and 'message'.
+        Dict with 'status' ('pass'/'fail'/'warn') and 'message'.
     """
     try:
         voices = await discover_voices()
@@ -113,10 +145,18 @@ async def check_voice_health() -> dict:
                 "message": f"Voice assignment returned {len(assignments)}/2",
             }
 
+        # Probe Gemini TTS fallback
+        gemini_check = await _check_gemini_tts_fallback()
+
         return {
             "status": "pass",
-            "message": f"{len(voices)} voices available, assignment working",
+            "message": (
+                f"{len(voices)} ElevenLabs voices available, assignment working. "
+                f"Gemini TTS fallback: "
+                f"{'ready' if gemini_check['available'] else 'unavailable — ' + gemini_check['message']}"
+            ),
             "voice_count": len(voices),
+            "gemini_tts_fallback": gemini_check,
         }
 
     except Exception as e:
