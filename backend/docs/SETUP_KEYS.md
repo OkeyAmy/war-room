@@ -1,223 +1,139 @@
-# How to Get API Keys for WAR ROOM
+# WAR ROOM: Complete Setup & API Key Guide
 
-This guide explains how to get the necessary API keys and credentials to run the **WAR ROOM** backend, both for local development and production deployment.
+Welcome to the WAR ROOM! This guide is designed for developers cloning the project from `github/OkeyAmy` who need to set up the environment from scratch.
+
+Because WAR ROOM relies heavily on external AI and real-time streaming services, you need to provision several API keys before the backend will run. This document will walk you through exactly where to go and what to click to get every single key required in the `.env` file.
 
 ---
 
-## Quick Start: Running Locally for FREE
+## Step 1: Clone the Repository
 
-You can run the entire backend locally **without spending any money**. Here's how:
-
-### Option A: Fully Offline (No API keys needed)
-
-The backend has built-in mock fallbacks for everything:
-
-- **No Gemini key?** → Agents use mock scenario data (pre-built crisis simulation)
-- **No GCP credentials?** → Firestore operations use an in-memory mock database
-- **No emulator?** → Everything still works with the mock layer
-
-Just run:
+First, download the code from GitHub to your local machine:
 
 ```bash
-cd backend
-python -m uvicorn main:app --reload
+git clone https://github.com/OkeyAmy/war-room.git
+cd war-room/backend
 ```
 
-### Option B: Free Gemini API + Local Emulator (Recommended for Development)
+Create your active environment file by copying the example:
 
-This gives you **real** AI responses without costing money:
+```bash
+cp .env.example .env
+```
 
-1. Get a **free Gemini API key** (see Section 1 below)
-2. Use the **Firestore Emulator** (see Section 3 below) — runs locally, no billing
-3. Comment out `FIRESTORE_EMULATOR_HOST` only when you're ready for production
+You will now fill out `backend/.env` using the keys gathered in the following steps.
 
-Your `.env` for free local development:
+---
+
+## Step 2: Google Cloud & Firebase (Database)
+
+WAR ROOM uses **Firestore** as its crisis ledger to sync state in real-time.
+
+1. Go to the [Firebase Console](https://console.firebase.google.com/).
+2. Click **Create a project** (e.g., name it `war-room-dev`).
+3. Once the project is created, click the **Build** dropdown on the left menu, and select **Firestore Database**. Click **Create database** (Start in test mode for local development).
+4. Now, go to **Project settings** (the gear icon near "Project Overview" on the top left).
+5. Navigate to the **Service accounts** tab.
+6. Click **Generate new private key** and save the `.json` file to your computer.
+7. **Move this `.json` file** into your `backend/` directory (e.g., `backend/war-room-firebase-adminsdk.json`).
+
+**Update your `.env`:**
 
 ```env
-# Gemini API (free tier)
-GOOGLE_API_KEY=your-gemini-api-key
+GCP_PROJECT_ID=your-firebase-project-id
+GOOGLE_APPLICATION_CREDENTIALS=war-room-firebase-adminsdk.json
+ENVIRONMENT=production # Use 'production' to use live Firebase instead of local emulator
+```
 
-# Firestore Emulator (free, runs locally)
-FIRESTORE_EMULATOR_HOST=localhost:8080
+---
+
+## Step 3: Google Gemini (The Brains)
+
+The AI cognitive engine relies on **Google Gemini** for reasoning, parsing the crisis board, and generating text.
+
+1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey).
+2. Sign in with your Google account.
+3. Click the **Get API key** button.
+4. Click **Create API key** (you can attach it to the Firebase Google Cloud project you created in Step 2, or create a new one).
+5. Copy the generated key.
+
+**Update your `.env`:**
+
+```env
+GOOGLE_API_KEY=AIzaSyYourGeneratedGeminiKeyHere
+```
+
+---
+
+## Step 4: ElevenLabs (The Voices)
+
+WAR ROOM uses **ElevenLabs** for ultra-realistic Text-to-Speech (TTS) and low-latency Speech-to-Text (STT) transcription.
+
+1. Go to the [ElevenLabs Developer Portal](https://elevenlabs.io/) and create an account.
+2. Click on your profile icon in the bottom left corner and select **Profile + API key**.
+3. Under the **API Key** section, click the eye icon to reveal your key, and copy it.
+
+**Update your `.env`:**
+
+```env
+ELEVENLABS_API_KEY=your-elevenlabs-api-key
+ELEVENLABS_STT_MODEL=scribe_v2_realtime
+ELEVENLABS_TTS_MODEL=eleven_turbo_v2_5
+VOICE_BACKEND=livekit_elevenlabs
+```
+
+---
+
+## Step 5: LiveKit (The Broadcast Stage)
+
+WAR ROOM uses **LiveKit** as the WebRTC infrastructure to pipe audio between the browser and the Python agents with zero latency.
+
+1. Go to [LiveKit Cloud](https://cloud.livekit.io/) and sign up.
+2. Create a new **Project**.
+3. Once your project is created, navigate to the **Settings** section in the left sidebar.
+4. Look under the **Keys** tab. You will see a `wss://...` URL, an API Key, and an API Secret.
+5. Click the eye icon to reveal the secret and copy all three values.
+
+**Update your `.env`:**
+
+```env
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your-livekit-api-key
+LIVEKIT_API_SECRET=your-livekit-api-secret
+```
+
+---
+
+## Step 6: Final Verification
+
+Your `backend/.env` file should now resemble this:
+
+```env
+# GCP Configuration
+GCP_PROJECT_ID=war-room-dev
+GOOGLE_APPLICATION_CREDENTIALS=war-room-firebase-adminsdk.json
+
+# Gemini API
+GOOGLE_API_KEY=AIzaSy...
+
+# LiveKit
+LIVEKIT_URL=wss://war-room-xyz.livekit.cloud
+LIVEKIT_API_KEY=APIXXXXXXXX
+LIVEKIT_API_SECRET=SecXXXXXXXX
+
+# ElevenLabs
+ELEVENLABS_API_KEY=sk_XXXXXXXX
+ELEVENLABS_STT_MODEL=scribe_v2_realtime
+ELEVENLABS_TTS_MODEL=eleven_turbo_v2_5
 
 # FastAPI
 HOST=0.0.0.0
 PORT=8000
 DEBUG=true
-
-# GCP — NOT NEEDED for local dev
-# GCP_PROJECT_ID=
-# GOOGLE_APPLICATION_CREDENTIALS=
+ENVIRONMENT=production
+VOICE_BACKEND=livekit_elevenlabs
+SINGLE_AGENT_VOICE_MODE=false
+MAX_AGENTS_PER_SESSION=4
 ```
 
-> **💡 When does it cost money?**
-> Only when you deploy to **Google Cloud Run** and use **live Firestore** (not the emulator). The Gemini API free tier is very generous for development.
-
----
-
-## 1. Gemini API Key (`GOOGLE_API_KEY`) — FREE
-
-The Gemini API has a **free tier** that is more than enough for development and testing.
-
-### How to get it
-
-1. Go to [Google AI Studio](https://aistudio.google.com/)
-2. Sign in with your Google account
-3. Click **Get API key** in the left sidebar
-4. Click **Create API key**
-5. Select a Google Cloud project (or let it create a new one)
-6. Copy the generated key
-
-### Free tier limits
-
-- **Gemini 2.0 Flash**: 15 requests per minute, 1 million tokens per minute (free)
-- **Gemini 2.0 Flash Live**: Available in the free tier
-
-Add to your `.env`:
-
-```env
-GOOGLE_API_KEY="AIzaSy..."
-```
-
-### Test it
-
-```bash
-cd backend
-source .venv/bin/activate
-python tests/test_ping_gemini.py
-```
-
----
-
-## 2. GCP Credentials (`GOOGLE_APPLICATION_CREDENTIALS` & `GCP_PROJECT_ID`)
-
-**⚠️ Only needed for production or testing with live Firestore.**  
-For local dev, use the Firestore Emulator (Section 3) instead.
-
-### How to get it
-
-1. **Create a GCP Project:**
-   - Go to the [Google Cloud Console](https://console.cloud.google.com/)
-   - Click the project dropdown → **New Project**
-   - Name it `war-room-production`
-   - Copy the **Project ID**
-
-2. **Enable Firestore API:**
-   - Search "Firestore API" in the console → **Enable**
-   - Go to Firestore → **Create Database** → choose "Native mode"
-   - Select a region (e.g., `us-central1`)
-
-3. **Create a Service Account:**
-   - Go to **IAM & Admin > Service Accounts**
-   - Click **Create Service Account**
-   - Name: `war-room-backend-sa`
-   - Grant role: `Cloud Datastore User`
-   - Click **Done**
-
-4. **Download the JSON Key:**
-   - Click the three dots → **Manage keys**
-   - **Add Key > Create new key > JSON**
-   - Save the file as `gcp-service-account.json` in the `backend/` directory
-
-Add to your `.env`:
-
-```env
-GCP_PROJECT_ID="war-room-production"
-GOOGLE_APPLICATION_CREDENTIALS="./gcp-service-account.json"
-```
-
-> 🔒 **SECURITY**: Never commit `gcp-service-account.json` or `.env` to GitHub.
-> The `.gitignore` already excludes these files.
-
-### Test it
-
-```bash
-cd backend
-source .venv/bin/activate
-python tests/test_ping_gcp.py
-```
-
----
-
-## 3. Firestore Emulator (FREE Local Database)
-
-The Firestore Emulator runs a local database that is **100% free** and does not hit Google Cloud.
-
-### Install
-
-```bash
-# Install Google Cloud CLI if not already
-curl -sSL https://sdk.cloud.google.com | bash
-
-# Install the emulator component
-gcloud components install cloud-firestore-emulator
-```
-
-### Run locally
-
-```bash
-gcloud emulators firestore start --host-port=localhost:8080
-```
-
-### Configure in `.env`
-
-```env
-FIRESTORE_EMULATOR_HOST=localhost:8080
-```
-
-> **To switch to real Firestore:** just remove or comment out `FIRESTORE_EMULATOR_HOST` in `.env`.
-> That's when billing may start (live Firestore has a generous free tier too: 50K reads/day, 20K writes/day).
-
----
-
-## 4. Running All Tests
-
-Run all connectivity tests in one command:
-
-```bash
-cd backend
-source .venv/bin/activate
-python tests/test_ping_all.py
-```
-
-This will test:
-
-- ✅ Gemini API key validity
-- ✅ Gemini text generation
-- ✅ Available Gemini models
-- ✅ Live API model availability
-- ✅ GCP project ID
-- ✅ Credentials file
-- ✅ Firestore emulator connectivity
-- ✅ Firestore write/read/delete
-
----
-
-## 5. Production Deployment (Google Cloud Run)
-
-When you're ready to deploy, your costs come from:
-
-- **Cloud Run**: Pay per request (very generous free tier: 2M requests/month)
-- **Firestore**: Pay per read/write (free tier: 50K reads, 20K writes per day)
-- **Gemini API**: Pay per token (or stick to free tier limits)
-
-### Steps
-
-1. Remove `FIRESTORE_EMULATOR_HOST` from your production config
-2. In Cloud Run settings → **Variables & Secrets**, add:
-   - `GOOGLE_API_KEY` = your Gemini API key
-   - `GCP_PROJECT_ID` = your project ID
-3. Cloud Run uses IAM natively — ensure the default service account has `Cloud Datastore User` role
-4. Deploy:
-
-   ```bash
-   gcloud builds submit --config cloudbuild.yaml
-   ```
-
-### Cost Summary
-
-| Service | Free Tier | After Free Tier |
-|---------|-----------|----------------|
-| Gemini 2.0 Flash | 15 RPM, 1M tokens/min | $0.075/1M input tokens |
-| Cloud Run | 2M requests/month | $0.40/1M requests |
-| Firestore | 50K reads, 20K writes/day | $0.06/100K reads |
+You are now ready to install the dependencies and boot the servers. See the root `README.md` for `npm install` and `pip install -r requirements.txt` instructions!
