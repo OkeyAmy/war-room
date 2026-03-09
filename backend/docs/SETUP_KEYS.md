@@ -25,24 +25,24 @@ You will now fill out `backend/.env` using the keys gathered in the following st
 
 ---
 
-## Step 2: Google Cloud & Firebase (Database)
+## Step 2: Google Cloud & Firestore (Database)
 
 WAR ROOM uses **Firestore** as its crisis ledger to sync state in real-time.
 
-1. Go to the [Firebase Console](https://console.firebase.google.com/).
-2. Click **Create a project** (e.g., name it `war-room-dev`).
-3. Once the project is created, click the **Build** dropdown on the left menu, and select **Firestore Database**. Click **Create database** (Start in test mode for local development).
-4. Now, go to **Project settings** (the gear icon near "Project Overview" on the top left).
-5. Navigate to the **Service accounts** tab.
-6. Click **Generate new private key** and save the `.json` file to your computer.
-7. **Move this `.json` file** into your `backend/` directory (e.g., `backend/war-room-firebase-adminsdk.json`).
+1. Go to the Google Cloud Console for Firestore: https://console.cloud.google.com/firestore
+2. Create or select a Google Cloud project (e.g., `war-room-dev`).
+3. In the left menu, select **Firestore** (Database) and click **Create database** (Start in test mode for local development).
+4. Open **IAM & Admin** → **Service Accounts**.
+5. Create a service account (for example, `war-room-service-account`) and generate a new JSON key.
+6. Download the key JSON file to your computer.
+7. **Move this JSON file** into your `backend/` directory (e.g., `backend/war-room-gcp-sa.json`).
 
 **Update your `.env`:**
 
 ```env
-GCP_PROJECT_ID=your-firebase-project-id
-GOOGLE_APPLICATION_CREDENTIALS=war-room-firebase-adminsdk.json
-ENVIRONMENT=production # Use 'production' to use live Firebase instead of local emulator
+GCP_PROJECT_ID=your-gcp-project-id
+GOOGLE_APPLICATION_CREDENTIALS=war-room-gcp-sa.json
+ENVIRONMENT=production # Use 'production' to use live Firestore instead of local emulator
 ```
 
 ---
@@ -111,7 +111,7 @@ Your `backend/.env` file should now resemble this:
 ```env
 # GCP Configuration
 GCP_PROJECT_ID=war-room-dev
-GOOGLE_APPLICATION_CREDENTIALS=war-room-firebase-adminsdk.json
+GOOGLE_APPLICATION_CREDENTIALS=war-room-gcp-sa.json
 
 # Gemini API
 GOOGLE_API_KEY=AIzaSy...
