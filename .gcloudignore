@@ -1,0 +1,59 @@
+# Ignore everything not needed for Cloud Build backend deployment
+
+# Frontend & dependencies
+node_modules/
+.next/
+out/
+dist/
+build/
+.npm/
+
+# Demo & media
+demo/
+
+# Frontend source (not needed for backend build)
+src/
+public/
+project/
+
+# Python caches & envs
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.venv/
+backend/venv/
+backend/env/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Data files (runtime data, not needed at build time)
+backend/data/
+
+# Test files
+backend/tests/
+backend/test_*.py
+
+# Local dev secrets (NEVER upload)
+backend/.env
+backend/gcp-service-account.json
+**/*.env.local
+**/*.env.*.local
+
+# Docs
+docs/
+backend/docs/
+
+# Git
+.git/
+.gitignore
+
+# IDE / OS
+.cursor/
+.vscode/
+.idea/
+**/.DS_Store
+**/Thumbs.db
+
+# Logs
+**/*.log
+logs/

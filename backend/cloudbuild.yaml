@@ -1,13 +1,18 @@
+# WAR ROOM Backend - Cloud Build automation
+# Triggers: push to main, or manual: gcloud builds submit --config=cloudbuild.yaml .
+# Prerequisites: Run scripts/deploy/setup-gcp.sh once to create Secret Manager secrets.
+
 steps:
-  # Build the container image
+  # Build the container image (dir: backend works for both GitHub trigger and manual submit from repo root)
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'gcr.io/$PROJECT_ID/war-room-backend:$COMMIT_SHA', '.']
+    dir: 'backend'
 
   # Push the container image to Container Registry
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/$PROJECT_ID/war-room-backend:$COMMIT_SHA']
 
-  # Deploy container image to Cloud Run
+  # Deploy container image to Cloud Run with API keys from Secret Manager
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -33,6 +38,10 @@ steps:
       - '0'
       - '--max-instances'
       - '10'
+      - '--set-env-vars'
+      - 'ENVIRONMENT=production,GCP_PROJECT_ID=$PROJECT_ID'
+      - '--set-secrets'
+      - 'GOOGLE_API_KEY=war-room-google-api-key:latest,GEMINI_API_KEY=war-room-google-api-key:latest,ELEVENLABS_API_KEY=war-room-elevenlabs-api-key:latest,LIVEKIT_URL=war-room-livekit-url:latest,LIVEKIT_API_KEY=war-room-livekit-api-key:latest,LIVEKIT_API_SECRET=war-room-livekit-api-secret:latest'
 
 images:
   - 'gcr.io/$PROJECT_ID/war-room-backend:$COMMIT_SHA'

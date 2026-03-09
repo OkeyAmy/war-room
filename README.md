@@ -211,3 +211,11 @@ npm run dev
 ```
 
 *The frontend will be accessible at `http://localhost:3000`.*
+
+### Deploy Backend to Google Cloud
+
+To deploy the backend to Cloud Run with automated builds:
+
+1. Run one-time setup: `./scripts/deploy/setup-gcp.sh`
+2. Deploy: `./scripts/deploy/deploy.sh` (or use `--key backend/gcp-service-account.json` for CI)
+3. Optional: Connect GitHub for auto-deploy on push to `main` — see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
