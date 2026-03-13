@@ -3,6 +3,7 @@ import path from "node:path";
 
 const LOADER = path.resolve(__dirname, 'src/visual-edits/component-tagger-loader.js');
 
+
 const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
@@ -16,7 +17,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  outputFileTracingRoot: path.resolve(__dirname, '../../'),
+  // outputFileTracingRoot removed — was causing doubled path on Vercel (/vercel/path0/vercel/path0/)
   typescript: {
     ignoreBuildErrors: true,
   },

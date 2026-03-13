@@ -483,7 +483,8 @@ async def health_check():
             if env == "production":
                 from google.cloud import firestore
                 db = firestore.AsyncClient()
-                doc = await db.collection("crisis_sessions").document("__health_check__").get()
+                # Use a plain document ID — Firestore reserves IDs wrapped in __double_underscores__
+                doc = await db.collection("crisis_sessions").document("health_probe").get()
                 return {
                     "status": "pass",
                     "message": f"Firestore connected (production, project={settings.gcp_project_id})",
@@ -507,14 +508,19 @@ async def health_check():
 
     async def check_event_system():
         try:
-            from utils.events import _get_db as get_events_db
-            events_db = get_events_db()
-            if hasattr(events_db, "collection"):
+            # Test the event queue mechanism (push / read queue)
+            from utils.events import get_event_queue, remove_event_queue
+            probe_id = "_health_probe_"
+            q = get_event_queue(probe_id)
+            await q.put({"type": "ping"})
+            item = q.get_nowait()
+            remove_event_queue(probe_id)
+            if item and item.get("type") == "ping":
                 return {
                     "status": "pass",
-                    "message": f"Event store operational ({type(events_db).__name__})",
+                    "message": "Event system operational (queue push/read verified)",
                 }
-            return {"status": "fail", "message": "Event store missing 'collection' method"}
+            return {"status": "fail", "message": "Event queue did not return expected probe item"}
         except Exception as e:
             return {"status": "fail", "message": str(e)}
 
