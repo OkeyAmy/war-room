@@ -277,10 +277,12 @@ export async function uploadIntakeDocuments(
  */
 export async function getScenario(
     sessionId: string,
-    token: string
+    token: string,
+    signal?: AbortSignal
 ): Promise<ScenarioResponse | ScenarioPollingResponse> {
     const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/scenario`, {
         headers: authHeaders(token),
+        signal,
     });
 
     if (res.status === 202) {
@@ -303,12 +305,17 @@ export async function pollUntilReady(
     token: string,
     onLog: (log: AssemblyLogEntry[]) => void,
     intervalMs: number = 1500,
-    timeoutMs: number = 90_000
+    timeoutMs: number = 240_000,
+    signal?: AbortSignal
 ): Promise<ScenarioResponse> {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
-        const result = await getScenario(sessionId, token);
+        if (signal?.aborted) {
+            throw new Error("Assembly polling aborted by client");
+        }
+
+        const result = await getScenario(sessionId, token, signal);
         onLog(result.assembly_log);
 
         if (result.scenario_ready) {
@@ -318,7 +325,7 @@ export async function pollUntilReady(
         await new Promise((r) => setTimeout(r, intervalMs));
     }
 
-    throw new Error("Scenario assembly timed out after 90 seconds");
+    throw new Error(`Scenario assembly timed out after ${Math.round(timeoutMs / 1000)} seconds`);
 }
 
 // ── Agent types ────────────────────────────────────────────────────────────────

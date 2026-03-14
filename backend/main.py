@@ -175,7 +175,7 @@ async def create_session(
 
     settings = get_settings()
     ws_url = f"wss://api.warroom.app/ws/{session_id}"
-    if settings.debug:
+    if settings.environment == "development":
         ws_url = f"ws://localhost:{settings.port}/ws/{session_id}"
 
     # Write the initial session document with assembling status
@@ -409,11 +409,17 @@ async def delete_session(
     for entry in roster:
         entry["status"] = "idle"
 
+    original_status = session_data.get("status")
+    
     await db.collection(COLLECTION_CRISIS_SESSIONS) \
             .document(session_id).update({
                 "status": SESSION_CLOSED,
                 "agent_roster": roster,
+                "abandoned": original_status == SESSION_ASSEMBLING,
             })
+
+    if original_status == SESSION_ASSEMBLING:
+        logger.warning(f"BOOTSTRAP_ABANDONED: Frontend deleted session {session_id} while assembling.")
 
     await push_event(session_id, EVENT_SESSION_STATUS, {
         "status": SESSION_CLOSED,

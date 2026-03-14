@@ -37,10 +37,10 @@ from config.constants import (
     COLLECTION_CRISIS_SESSIONS,
     COLLECTION_AGENT_MEMORY,
     EVENT_SESSION_STATUS,
-    EVENT_AGENT_ASSEMBLING,
     EVENT_SESSION_READY,
     SESSION_ASSEMBLING,
     SESSION_BRIEFING,
+    SESSION_CLOSED,
     DEFAULT_POSTURE,
 )
 
@@ -88,6 +88,19 @@ async def _update_assembly_log(
         "assembly_log": log,
     })
 
+
+async def _is_session_abandoned(session_id: str) -> bool:
+    """Check if the session was deleted mid-bootstrap by the frontend."""
+    db = _get_db()
+    doc = await db.collection(COLLECTION_CRISIS_SESSIONS).document(session_id).get()
+    if not doc.exists:
+        return True
+    
+    data = doc.to_dict()
+    if data.get("status") == SESSION_CLOSED or data.get("abandoned", False):
+        return True
+        
+    return False
 
 # ── BOOTSTRAP ENTRY POINT ──────────────────────────────────────────────
 
@@ -158,6 +171,10 @@ async def bootstrap_session(
         "ANALYZING...",
         "in_progress",
     )
+
+    if await _is_session_abandoned(session_id):
+        logger.warning(f"Bootstrap for {session_id} aborted early: session closed.")
+        return session_id
 
     scenario = await run_scenario_analyst(crisis_input, session_id)
     # MULTI-AGENT: commented out single-agent truncation — all agents are used
@@ -260,9 +277,12 @@ async def bootstrap_session(
     await _update_assembly_log(
         session_id,
         "Generating tactical cast:",
-        f"SYNCING {agent_count} AGENTS",
-        "in_progress",
+        "complete",
     )
+
+    if await _is_session_abandoned(session_id):
+        logger.warning(f"Bootstrap for {session_id} aborted after scenario analyst.")
+        return session_id
 
     # Step 4: Voice assignment
     voice_assignments = assign_voices(scenario.get("agents", []))
@@ -425,6 +445,16 @@ async def bootstrap_session(
         f"SYNCED {agent_count} AGENTS",
         "complete",
     )
+
+    if await _is_session_abandoned(session_id):
+        logger.warning(f"Bootstrap for {session_id} aborted before World/Observer start.")
+        # Best-effort cleanup of newly spawned agents
+        for agent in agent_instances.values():
+            try:
+                await agent.close()
+            except Exception:
+                pass
+        return session_id
 
     # Step 8: Observer Agent
     await _update_assembly_log(

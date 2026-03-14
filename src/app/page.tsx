@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createSession, pollUntilReady, uploadIntakeDocuments, type AssemblyLogEntry } from "@/lib/api";
+import { createSession, pollUntilReady, deleteSession, uploadIntakeDocuments, type AssemblyLogEntry } from "@/lib/api";
 import { saveSession } from "@/lib/sessionStore";
 
 // ─── Assembly Loading Screen ────────────────────────────────────────────────
@@ -85,7 +84,20 @@ export default function LandingPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [isFileDragging, setIsFileDragging] = useState(false);
 
+  // Store active session refs for cleanup if aborted
+  const activeSessionRef = React.useRef<{ id: string; token: string } | null>(null);
+  const abortControllerRef = React.useRef<AbortController | null>(null);
+
   const router = useRouter();
+
+  // Cleanup on unmount or manual navigation away
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   // Reveal chairman options once crisis input is substantial
   useEffect(() => {
@@ -108,6 +120,9 @@ export default function LandingPage() {
         durationMinutes
       );
 
+      activeSessionRef.current = { id: session.session_id, token: session.chairman_token };
+      abortControllerRef.current = new AbortController();
+
       // 2. Persist to cookie for the war-room page
       saveSession({
         sessionId: session.session_id,
@@ -121,20 +136,39 @@ export default function LandingPage() {
         await uploadIntakeDocuments(session.session_id, session.chairman_token, files);
       }
 
-      // 3. Poll until scenario_ready, updating the log live
-      await pollUntilReady(
-        session.session_id,
-        session.chairman_token,
-        (log) => setAssemblyLog([...log]),
-        1500,
-        90_000
-      );
+      try {
+        // 4. Poll until scenario_ready, updating the log live
+        await pollUntilReady(
+          session.session_id,
+          session.chairman_token,
+          (log) => setAssemblyLog([...log]),
+          1500,
+          240_000,
+          abortControllerRef.current.signal
+        );
 
-      // 4. Navigate to the war room (protected route)
-      router.push(`/war-room/${session.session_id}`);
+        // 5. Navigate to the war room (protected route)
+        router.push(`/war-room/${session.session_id}`);
+      } catch (pollErr) {
+        // If polling fails (timeout or abort), we must explicitly terminate the backend
+        if (activeSessionRef.current) {
+          try {
+            await deleteSession(activeSessionRef.current.id, activeSessionRef.current.token);
+          } catch (deleteErr) {
+            console.error("Failed to clean up aborted session:", deleteErr);
+          }
+        }
+        throw pollErr;
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      if (err instanceof Error && err.name === "AbortError") {
+        setError("Assembly cancelled.");
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg.includes("timed out") ? "Assembly timed out. Backend session terminated." : msg);
+      }
       setIsAssembling(false);
+      activeSessionRef.current = null;
     }
   };
 

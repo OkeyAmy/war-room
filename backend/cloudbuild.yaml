@@ -39,7 +39,7 @@ steps:
       - '--max-instances'
       - '10'
       - '--set-env-vars'
-      - 'ENVIRONMENT=production,GCP_PROJECT_ID=$PROJECT_ID'
+      - 'ENVIRONMENT=production,GCP_PROJECT_ID=$PROJECT_ID,DEBUG=false'
       - '--set-secrets'
       - 'GOOGLE_API_KEY=war-room-google-api-key:latest,GEMINI_API_KEY=war-room-google-api-key:latest,ELEVENLABS_API_KEY=war-room-elevenlabs-api-key:latest,LIVEKIT_URL=war-room-livekit-url:latest,LIVEKIT_API_KEY=war-room-livekit-api-key:latest,LIVEKIT_API_SECRET=war-room-livekit-api-secret:latest'
 

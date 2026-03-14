@@ -317,11 +317,23 @@ class CrisisAgent:
                 self._lk_http_session = aiohttp.ClientSession(
                     timeout=aiohttp.ClientTimeout(total=45, sock_connect=10),
                 )
-                self._lk_stt = elevenlabs.STT(
-                    api_key=settings.elevenlabs_api_key or None,
-                    model_id=self.elevenlabs_stt_model,
-                    http_session=self._lk_http_session,
-                )
+                # model_id kwarg added in livekit-plugins-elevenlabs >=1.4.x.
+                # Defend against older versions that lack it.
+                try:
+                    self._lk_stt = elevenlabs.STT(
+                        api_key=settings.elevenlabs_api_key or None,
+                        model_id=self.elevenlabs_stt_model,
+                        http_session=self._lk_http_session,
+                    )
+                except TypeError:
+                    logger.warning(
+                        f"[VOICE] model_id not supported by installed STT plugin, "
+                        f"falling back without model_id for {self.agent_id}"
+                    )
+                    self._lk_stt = elevenlabs.STT(
+                        api_key=settings.elevenlabs_api_key or None,
+                        http_session=self._lk_http_session,
+                    )
                 self._lk_tts = elevenlabs.TTS(
                     api_key=settings.elevenlabs_api_key or None,
                     voice_id=self.assigned_voice,
