@@ -4,6 +4,8 @@
 
 This document outlines the holistic system architecture and the complex interactions between the Next.js frontend client and the robust AI-driven Python backend.
 
+Note: For detailed backend setup, API key instructions, and a walkthrough of how the backend is built, see the backend documentation in `./backend/docs/` — particularly `./backend/docs/SETUP_KEYS.md`.
+
 ---
 
 ## 🏗️ High-Level Architecture Overview
