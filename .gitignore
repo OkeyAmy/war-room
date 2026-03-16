@@ -41,3 +41,7 @@ project/
 .orchids/
 
 demo/
+
+# local environment files
+.env.local
+.env.*
