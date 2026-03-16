@@ -44,4 +44,5 @@ demo/
 
 # local environment files
 .env.local
-.env.*
+.env
+# .env.*
