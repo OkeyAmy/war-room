@@ -12,8 +12,8 @@ Note: For detailed backend setup, API key instructions, and a walkthrough of how
 
 The system is designed as a decoupled, real-time client-server application optimized for high-bandwidth, continuous state synchronization and raw audio streaming.
 
-* **Frontend Client:** A highly responsive React/Next.js (App Router) Single Page Application styled with modern visuals and functional dashboards. Located in `./src`.
-* **Backend Server:** A scalable, asynchronous Python FastAPI server orchestrating the AI lifecycle, maintaining state, and routing communications. Located in `./backend`.
+* **Frontend Client:** A highly responsive React/Next.js (App Router) Single Page Application styled with modern visuals and functional dashboards. Located in [./src](./src/)`.
+* **Backend Server:** A scalable, asynchronous Python FastAPI server orchestrating the AI lifecycle, maintaining state, and routing communications. Located in [./backend](./backend/).
 
 ### Core Interaction Paradigm
 
