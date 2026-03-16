@@ -205,9 +205,9 @@ python main.py
 
 ```bash
 # In an adjacent terminal window
-cd [project-root]
-npm install
-npm run dev
+cd war-room
+pnpm install
+pnpm run dev
 ```
 
 *The frontend will be accessible at `http://localhost:3000`.*
